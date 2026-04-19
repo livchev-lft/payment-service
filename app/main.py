@@ -8,9 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import ORJSONResponse
 
 from app.api.v1.routes import router as payments_router
-from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.infrastructure.broker.declare import declare_topology
+from app.infrastructure.broker.setup import declare_topology, get_broker
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +17,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     configure_logging()
-    settings = get_settings()
-    await declare_topology(settings.rabbitmq_url)
+    broker = get_broker()
+    await broker.connect()
+    await declare_topology(broker)
     logger.info("API starting up")
-    yield
-    logger.info("API shutting down")
+    try:
+        yield
+    finally:
+        await broker.close()
+        logger.info("API shutting down")
 
 
 def create_app() -> FastAPI:
