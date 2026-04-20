@@ -1,6 +1,7 @@
 """FastAPI dependencies."""
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -17,7 +18,9 @@ async def require_api_key(
     settings: SettingsDep,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ) -> None:
-    if not x_api_key or x_api_key != settings.api_key:
+    if not x_api_key or not hmac.compare_digest(
+        x_api_key.encode("utf-8"), settings.api_key.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or missing X-API-Key",

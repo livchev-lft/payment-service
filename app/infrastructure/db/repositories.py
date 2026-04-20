@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.enums import OutboxStatus, PaymentStatus
+from app.domain.enums import OutboxStatus, PaymentStatus, WebhookDeliveryStatus
 from app.infrastructure.db.models import OutboxEvent, Payment
 
 
@@ -44,6 +44,29 @@ class PaymentRepository:
                 status=status,
                 failure_reason=failure_reason,
                 processed_at=datetime.now(timezone.utc),
+            )
+        )
+        await self._session.execute(stmt)
+
+    async def mark_webhook_delivered(self, payment_id: uuid.UUID) -> None:
+        stmt = (
+            update(Payment)
+            .where(Payment.id == payment_id)
+            .values(
+                webhook_delivery_status=WebhookDeliveryStatus.DELIVERED,
+                webhook_delivered_at=datetime.now(timezone.utc),
+                webhook_failure_reason=None,
+            )
+        )
+        await self._session.execute(stmt)
+
+    async def mark_webhook_failed(self, payment_id: uuid.UUID, reason: str) -> None:
+        stmt = (
+            update(Payment)
+            .where(Payment.id == payment_id)
+            .values(
+                webhook_delivery_status=WebhookDeliveryStatus.FAILED,
+                webhook_failure_reason=reason,
             )
         )
         await self._session.execute(stmt)

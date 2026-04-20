@@ -12,7 +12,5 @@ RUN pip install --upgrade pip && pip install .
 
 COPY app ./app
 COPY alembic.ini ./
-COPY scripts ./scripts
-RUN chmod +x ./scripts/*.sh
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

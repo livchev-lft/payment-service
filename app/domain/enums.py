@@ -17,3 +17,9 @@ class Currency(StrEnum):
 class OutboxStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"
+
+
+class WebhookDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    FAILED = "failed"

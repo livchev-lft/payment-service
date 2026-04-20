@@ -1,9 +1,6 @@
-"""Consumer process: FastStream app that processes payments and runs the outbox relay.
+"""Payment consumer: processes payments.new, routes failures to retry/DLQ.
 
-Failure routing uses ack-on-success + manual republish rather than nack/requeue
-so we can carry the retry counter across attempts via the x-retry-count header.
-Outbox relay runs as a background task inside this process for now — it will
-move to its own deployment later.
+Does not own the outbox relay anymore — that's a separate service now.
 """
 from __future__ import annotations
 
@@ -26,8 +23,6 @@ from app.infrastructure.broker.topology import (
     HEADER_IDEMPOTENCY_KEY,
     HEADER_RETRY_COUNT,
 )
-from app.infrastructure.webhook.client import WebhookClient
-from app.workers.outbox_relay import OutboxRelay
 from app.workers.processor import PaymentProcessor
 
 logger = logging.getLogger(__name__)
@@ -37,12 +32,7 @@ app = FastStream(broker)
 
 _settings = get_settings()
 _publisher = Publisher(broker)
-_processor = PaymentProcessor(
-    settings=_settings,
-    webhook_client=WebhookClient(max_attempts=3),
-)
-_relay = OutboxRelay(_settings, _publisher)
-_relay_task: asyncio.Task[None] | None = None
+_processor = PaymentProcessor(settings=_settings)
 
 
 @broker.subscriber(main_queue, main_exchange)
@@ -76,22 +66,9 @@ async def _configure() -> None:
 
 
 @app.after_startup
-async def _start_relay() -> None:
+async def _declare() -> None:
     await declare_topology(broker)
-    global _relay_task
-    _relay_task = asyncio.create_task(_relay.run(), name="outbox-relay")
-    logger.info("Consumer started")
-
-
-@app.on_shutdown
-async def _stop_relay() -> None:
-    _relay.stop()
-    if _relay_task is not None:
-        try:
-            await asyncio.wait_for(_relay_task, timeout=5)
-        except asyncio.TimeoutError:
-            _relay_task.cancel()
-    logger.info("Consumer stopped")
+    logger.info("Payment consumer started")
 
 
 if __name__ == "__main__":

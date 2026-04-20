@@ -18,7 +18,7 @@ from sqlalchemy import JSON, DateTime, Index, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.domain.enums import OutboxStatus, PaymentStatus
+from app.domain.enums import OutboxStatus, PaymentStatus, WebhookDeliveryStatus
 from app.infrastructure.db.base import Base
 
 
@@ -48,6 +48,14 @@ class Payment(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    webhook_delivery_status: Mapped[WebhookDeliveryStatus] = mapped_column(
+        String(16), nullable=False, default=WebhookDeliveryStatus.PENDING
+    )
+    webhook_delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    webhook_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class OutboxEvent(Base):

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-from app.domain.enums import Currency, PaymentStatus
+from app.domain.enums import Currency, PaymentStatus, WebhookDeliveryStatus
 
 
 class PaymentCreateRequest(BaseModel):
@@ -23,7 +23,6 @@ class PaymentCreateRequest(BaseModel):
     @field_validator("metadata")
     @classmethod
     def _metadata_size(cls, v: dict[str, Any]) -> dict[str, Any]:
-        # Keep metadata sane — prevents pathological payloads.
         import json
 
         if len(json.dumps(v)) > 8192:
@@ -41,6 +40,7 @@ class PaymentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    idempotency_key: str
     amount: Decimal
     currency: str
     description: str
@@ -50,6 +50,9 @@ class PaymentResponse(BaseModel):
     failure_reason: str | None
     created_at: datetime
     processed_at: datetime | None
+    webhook_delivery_status: WebhookDeliveryStatus
+    webhook_delivered_at: datetime | None
+    webhook_failure_reason: str | None
 
 
 class ErrorResponse(BaseModel):

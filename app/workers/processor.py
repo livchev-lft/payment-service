@@ -1,4 +1,9 @@
-"""Payment processing logic, extracted so it can be unit-tested independently."""
+"""Payment processing logic.
+
+Writes the payment outcome and the webhook.send outbox event in a single
+transaction so the webhook event is never lost if this worker crashes after
+committing the payment status.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -8,30 +13,22 @@ import uuid
 
 from app.core.config import Settings
 from app.domain.enums import PaymentStatus
-from app.infrastructure.db.repositories import PaymentRepository
+from app.infrastructure.db.repositories import OutboxRepository, PaymentRepository
 from app.infrastructure.db.session import get_sessionmaker
-from app.infrastructure.webhook.client import WebhookClient, WebhookDeliveryError
 
 logger = logging.getLogger(__name__)
 
 
 class PaymentProcessor:
-    def __init__(self, settings: Settings, webhook_client: WebhookClient) -> None:
+    def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._webhook = webhook_client
 
     async def process(self, event: dict) -> None:
-        """Process a single payment event.
-
-        Raises on transient errors (DB / broker-worthy) so that the consumer
-        can route the message into the retry chain. A failed payment (90/10
-        emulation) is NOT raised — it's a valid business outcome and gets
-        written to DB + delivered via webhook as `failed`.
-        """
         payment_id = uuid.UUID(event["payment_id"])
+        idempotency_key = event.get("idempotency_key", "")
+        webhook_url = event["webhook_url"]
         logger.info("Processing payment", extra={"payment_id": str(payment_id)})
 
-        # Simulate gateway call
         await asyncio.sleep(
             random.uniform(
                 self._settings.processing_min_seconds,
@@ -42,28 +39,32 @@ class PaymentProcessor:
         new_status = PaymentStatus.SUCCEEDED if gateway_ok else PaymentStatus.FAILED
         failure_reason = None if gateway_ok else "gateway declined (emulated)"
 
-        # Update DB — this MUST succeed. If it raises, we retry the whole message.
-        sessionmaker = get_sessionmaker()
-        async with sessionmaker() as session:
-            repo = PaymentRepository(session)
-            await repo.mark_processed(payment_id, new_status, failure_reason)
-            await session.commit()
-
-        # Deliver webhook. Webhook has its own retry. If it still fails, we
-        # log and move on — the payment state is already final in DB, and
-        # retrying the whole message would re-run the emulated processing
-        # and flip the result randomly, which is worse.
-        webhook_payload = {
+        webhook_body = {
             "payment_id": str(payment_id),
             "status": new_status.value,
             "failure_reason": failure_reason,
+            "amount": event.get("amount"),
+            "currency": event.get("currency"),
         }
-        try:
-            await self._webhook.deliver(event["webhook_url"], webhook_payload)
-            logger.info("Webhook delivered", extra={"payment_id": str(payment_id)})
-        except WebhookDeliveryError as e:
-            logger.error(
-                "Webhook delivery failed after retries",
-                extra={"payment_id": str(payment_id), "error": str(e)},
+
+        sessionmaker = get_sessionmaker()
+        async with sessionmaker() as session:
+            payments = PaymentRepository(session)
+            outbox = OutboxRepository(session)
+            await payments.mark_processed(payment_id, new_status, failure_reason)
+            await outbox.add(
+                aggregate_id=payment_id,
+                event_type="webhook.send",
+                payload={
+                    "payment_id": str(payment_id),
+                    "idempotency_key": idempotency_key,
+                    "webhook_url": webhook_url,
+                    "payload": webhook_body,
+                },
             )
-            # Not re-raised: payment outcome is final, see comment above.
+            await session.commit()
+
+        logger.info(
+            "Payment processed, webhook.send queued",
+            extra={"payment_id": str(payment_id), "status": new_status.value},
+        )
