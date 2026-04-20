@@ -23,6 +23,7 @@ from app.infrastructure.broker.topology import (
     HEADER_IDEMPOTENCY_KEY,
     HEADER_RETRY_COUNT,
 )
+from app.infrastructure.db.session import close_engine
 from app.workers.processor import PaymentProcessor
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,12 @@ async def _configure() -> None:
 async def _declare() -> None:
     await declare_topology(broker)
     logger.info("Payment consumer started")
+
+
+@app.on_shutdown
+async def _cleanup() -> None:
+    await close_engine()
+    logger.info("Payment consumer stopped")
 
 
 if __name__ == "__main__":

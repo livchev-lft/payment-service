@@ -28,7 +28,7 @@ from app.infrastructure.broker.topology import (
     HEADER_RETRY_COUNT,
 )
 from app.infrastructure.db.repositories import PaymentRepository
-from app.infrastructure.db.session import get_sessionmaker
+from app.infrastructure.db.session import close_engine, get_sessionmaker
 from app.infrastructure.webhook.client import WebhookClient, WebhookDeliveryError
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,10 @@ async def handle_webhook(body: dict, message: RabbitMessage) -> None:
         )
         next_attempt = retry_count + 1
         if next_attempt > _settings.max_retry_attempts:
+            logger.error(
+                "Webhook delivery gave up after max attempts",
+                extra={"payment_id": str(payment_id), "attempts": retry_count},
+            )
             await _mark_failed(payment_id, reason=str(e))
             await _publisher.publish_webhook_dlq(
                 payload=body, idempotency_key=idempotency_key, reason=str(e)
@@ -105,6 +109,12 @@ async def _configure() -> None:
 async def _declare() -> None:
     await declare_topology(broker)
     logger.info("Webhook worker started")
+
+
+@app.on_shutdown
+async def _cleanup() -> None:
+    await close_engine()
+    logger.info("Webhook worker stopped")
 
 
 if __name__ == "__main__":

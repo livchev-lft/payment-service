@@ -10,6 +10,7 @@ from fastapi.responses import ORJSONResponse
 from app.api.v1.routes import router as payments_router
 from app.core.logging import configure_logging
 from app.infrastructure.broker.setup import declare_topology, get_broker
+from app.infrastructure.db.session import close_engine
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         yield
     finally:
         await broker.close()
+        await close_engine()
         logger.info("API shutting down")
 
 

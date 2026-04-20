@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infrastructure.broker.publisher import Publisher
 from app.infrastructure.broker.setup import declare_topology, get_broker
+from app.infrastructure.db.session import close_engine
 from app.workers.outbox_relay import OutboxRelay
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ async def main() -> None:
     except asyncio.TimeoutError:
         relay_task.cancel()
     await broker.close()
+    await close_engine()
     logger.info("Outbox relay process stopped")
 
 
